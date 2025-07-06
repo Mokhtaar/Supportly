@@ -14,6 +14,31 @@ const ChatWidgetRequestSchema = z.object({
   widgetKey: z.string().uuid(),
 });
 
+// Handle CORS preflight requests
+export async function OPTIONS(request: NextRequest) {
+  try {
+    const origin = request.headers.get('origin');
+    
+    // For preflight requests, we allow the request to proceed
+    // The actual domain validation will happen in the POST request
+    // when we have access to the widgetKey in the request body
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': origin || '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Requested-With',
+        'Access-Control-Max-Age': '86400', // Cache preflight for 24 hours
+        'Vary': 'Origin',
+      },
+    });
+
+  } catch (error) {
+    console.error('Error in chat widget OPTIONS:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -125,11 +150,17 @@ export async function POST(request: NextRequest) {
       // Continue even if history saving fails
     }
 
+    const origin = request.headers.get('origin');
+    
     return NextResponse.json({ 
       message: aiResponse,
       agentName: agent.name,
     }, {
       headers: {
+        'Access-Control-Allow-Origin': origin || '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Requested-With',
+        'Vary': 'Origin',
         'Content-Security-Policy': "default-src 'self'; connect-src 'self'",
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
