@@ -322,7 +322,7 @@ export default function AgentEditPage({
           <SidebarFooter className="border-t p-4">
             <Button onClick={goBack} variant="outline" className="w-full">
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
+              Back to Dash
             </Button>
           </SidebarFooter>
         </Sidebar>
