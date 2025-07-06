@@ -1,0 +1,225 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Multi-tenant model: Client represents a company/organization
+model Client {
+  id          String   @id @default(uuid())
+  name        String   // Company name
+  slug        String   @unique // URL-friendly identifier (e.g., "acme-corp")
+  subdomain   String?  @unique // Optional subdomain (e.g., "acme.supportgenius.com")
+  plan        Plan     @default(FREE) // Subscription plan
+  maxUsers    Int      @default(5) // Max users allowed
+  maxAgents   Int      @default(3) // Max AI agents allowed
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users       User[]
+  agents      Agent[]
+
+  @@map("clients")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// User belongs to a Client (company)
+model User {
+  id        String   @id // Supabase auth ID
+  email     String   @unique
+  clientId  String   @map("client_id")
+  role      UserRole @default(MEMBER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  client          Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAgents   Agent[]        @relation("AgentCreator") // Agents created by this user
+  conversations   Conversation[] // Conversations initiated by this user
+
+  @@index([clientId])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER    // Company owner (full access)
+  ADMIN    // Company admin (manage users and agents)
+  MEMBER   // Regular user (use agents)
+}
+
+// Agent belongs to Client, but tracks who created it
+model Agent {
+  id                String   @id @default(uuid())
+  clientId          String   @map("client_id") // Which company owns this agent
+  createdById       String   @map("created_by_id") // Which user created it
+  name              String
+  tone              String
+  instructions      String   @db.Text
+  whatsappNumber    String?  @map("whatsapp_number") // WhatsApp Business number
+  chatWidgetConfig  Json     @default("{\"primary_color\": \"#3B82F6\", \"initial_greeting\": \"Hi! How can I help you today?\", \"position\": \"bottom-right\"}") @map("chat_widget_config")
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  
+  // Security fields for widget
+  allowedDomains    String[] @default([]) @map("allowed_domains") // Domains allowed to use this widget
+  widgetKey         String   @unique @default(uuid()) @map("widget_key") // Secret key for widget authentication
+
+  // Relations
+  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy      User            @relation("AgentCreator", fields: [createdById], references: [id])
+  knowledgeBase  KnowledgeBase[]
+  conversations  Conversation[]  // Updated relation
+  apiKeys        ApiKey[]
+
+  @@index([clientId])
+  @@index([createdById])
+  @@map("agents")
+}
+
+model KnowledgeBase {
+  id               String            @id @default(uuid())
+  agentId          String            @map("agent_id")
+  fileName         String            @map("file_name")
+  originalName     String            @map("original_name")
+  fileSize         Int               @map("file_size")
+  fileType         String            @map("file_type")
+  processingStatus ProcessingStatus  @default(PENDING) @map("processing_status")
+  chunkCount       Int               @default(0) @map("chunk_count")
+  errorMessage     String?           @map("error_message") @db.Text
+  uploadedAt       DateTime          @default(now()) @map("uploaded_at")
+  processedAt      DateTime?         @map("processed_at")
+
+  // Relations
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([processingStatus])
+  @@map("knowledge_base")
+}
+
+// Conversation/Chat Thread - stores conversation metadata
+model Conversation {
+  id              String       @id @default(uuid())
+  agentId         String       @map("agent_id")
+  channel         Channel
+  sessionId       String       @map("session_id") // External session identifier
+  userId          String?      @map("user_id") // Optional: which user initiated the chat
+  userEmail       String?      @map("user_email") // For anonymous users
+  userPhone       String?      @map("user_phone") // For WhatsApp/SMS
+  status          ConversationStatus @default(ACTIVE)
+  title           String?      // Optional conversation title
+  summary         String?      @db.Text // AI-generated summary
+  tags            String[]     @default([]) // For categorization
+  priority        Priority     @default(NORMAL)
+  lastMessageAt   DateTime     @map("last_message_at") @default(now())
+  messageCount    Int          @default(0) @map("message_count")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  agent    Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages Message[]
+
+  @@index([agentId])
+  @@index([sessionId])
+  @@index([channel])
+  @@index([status])
+  @@index([lastMessageAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("conversations")
+}
+
+// Individual Messages within a conversation
+model Message {
+  id              String      @id @default(uuid())
+  conversationId  String      @map("conversation_id")
+  role            MessageRole // 'USER' or 'ASSISTANT'
+  content         String      @db.Text // The actual message content
+  contentType     String      @default("text") @map("content_type") // text, image, file, etc.
+  metadata        Json?       // Additional message metadata (attachments, etc.)
+  responseTimeMs  Int?        @map("response_time_ms") // Only relevant for assistant messages
+  tokensUsed      Int?        @map("tokens_used") // For tracking usage
+  isEdited        Boolean     @default(false) @map("is_edited")
+  editedAt        DateTime?   @map("edited_at")
+  timestamp       DateTime    @default(now())
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([role])
+  @@index([timestamp(sort: Desc)])
+  @@map("messages")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  agentId     String    @map("agent_id")
+  keyHash     String    @unique @map("key_hash")
+  keyPreview  String    @map("key_preview") // First few characters for display
+  name        String
+  isActive    Boolean   @default(true) @map("is_active")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@map("api_keys")
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Channel {
+  WEB
+  WHATSAPP
+  TELEGRAM
+  API
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+enum ConversationStatus {
+  ACTIVE
+  RESOLVED
+  ESCALATED
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}

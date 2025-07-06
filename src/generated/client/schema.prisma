@@ -1,0 +1,106 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum ProcessingStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Channel {
+  WHATSAPP
+  WEBSITE
+}
+
+model User {
+  id        String   @id
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  agents        Agent[]
+  knowledgeBase KnowledgeBase[]
+  chatHistory   ChatHistory[]
+  apiKeys       ApiKey[]
+
+  @@map("users")
+}
+
+model Agent {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  name             String   @default("AI Assistant")
+  tone             String   @default("Helpful")
+  instructions     String   @default("You are a helpful AI assistant.")
+  whatsappNumber   String?  @map("whatsapp_number")
+  chatWidgetConfig String   @default("{\"primary_color\": \"#3B82F6\", \"initial_greeting\": \"Hi! How can I help you today?\", \"position\": \"bottom-right\"}") @map("chat_widget_config")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("agents")
+}
+
+model KnowledgeBase {
+  id          String           @id @default(cuid())
+  userId      String           @map("user_id")
+  fileName    String           @map("file_name")
+  fileType    String           @map("file_type")
+  fileSize    Int              @map("file_size")
+  content     String
+  chunks      Int?
+  vectorId    String?          @map("vector_id")
+  status      ProcessingStatus @default(PROCESSING)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  processedAt DateTime?        @map("processed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge_base")
+}
+
+model ChatHistory {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  sessionId   String   @map("session_id")
+  channel     Channel
+  userMessage String   @map("user_message")
+  botResponse String   @map("bot_response")
+  timestamp   DateTime @default(now())
+  metadata    String? // JSON string for additional data
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_history")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  keyName    String    @map("key_name")
+  keyValue   String    @map("key_value")
+  service    String // 'openai', 'pinecone', 'twilio', etc.
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyName])
+  @@map("api_keys")
+}
